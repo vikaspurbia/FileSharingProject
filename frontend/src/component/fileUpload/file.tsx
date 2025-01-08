@@ -70,9 +70,9 @@ const ShareFile = () => {
         fullWidth
         style={{ marginTop: '16px' }}
       >
-        <MenuItem value="individually">Individually</MenuItem>
-        <MenuItem value="role-based">Role-based</MenuItem>
-        <MenuItem value="multi-user">Multi-user</MenuItem>
+        <MenuItem value="individually">Email</MenuItem>
+        <MenuItem value="role-based">Role</MenuItem>
+  
       </Select>
 
       {shareType !== 'role-based' && (
