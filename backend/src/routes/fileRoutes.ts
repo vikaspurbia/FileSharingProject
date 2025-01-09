@@ -1,5 +1,5 @@
 import express from 'express';
-import { uploadMiddleware, uploadFile, shareFile } from '../controllers/fileController';
+import { uploadMiddleware, uploadFile, shareFile, getBucketData } from '../controllers/fileController';
 
 const router = express.Router();
 
@@ -14,5 +14,8 @@ router.post('/share-file', async (req, res, next) => {
     next(error); // Pass any errors to the next middleware
   }
 });
+
+router.get('/bucket-data', getBucketData);
+
 
 export default router;

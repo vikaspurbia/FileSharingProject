@@ -220,6 +220,9 @@
 
 
 
+
+
+
 import { Request, Response } from 'express';
 import { minioClient } from '../config/minoConfig';
 import { User } from '../models/user.model';  // Assuming you still want to fetch users for role-based sharing
@@ -401,4 +404,49 @@ const sendEmailNotification = (email: string, fileName: string, downloadUrl: str
       console.log('Email sent:', info.response);
     }
   });
+};
+
+
+
+
+export const getBucketData = async (req: Request, res: Response): Promise<void> => {
+  const bucketName = 'my-bucket';  // Ensure this matches your actual bucket name
+
+  try {
+    console.log('Checking if bucket exists...');
+
+    // Check if the bucket exists
+    const bucketExists = await minioClient.bucketExists(bucketName);
+    console.log(`Bucket exists: ${bucketExists}`);
+
+    if (!bucketExists) {
+      res.status(404).send({ error: `Bucket ${bucketName} does not exist.` });
+      return;
+    }
+
+    console.log('Bucket found. Listing objects...');
+
+    // List objects in the bucket
+    const objectsList: any[] = [];
+    const stream = minioClient.listObjectsV2(bucketName, '', true);
+
+    stream.on('data', (obj) => {
+      console.log('Object received:', obj);
+      objectsList.push(obj);
+    });
+
+    stream.on('end', () => {
+      console.log('Stream ended. Objects list:', objectsList);
+      res.status(200).send({ message: 'Bucket data retrieved successfully.', objectsList });
+    });
+
+    stream.on('error', (err) => {
+      console.error('Error retrieving bucket data:', err);
+      res.status(500).send({ error: 'Error retrieving bucket data.', details: err });
+    });
+
+  } catch (err) {
+    console.error('Error occurred during bucket data retrieval:', err);
+    res.status(500).send({ error: 'Failed to retrieve bucket data.', details: err });
+  }
 };
