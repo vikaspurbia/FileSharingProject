@@ -220,14 +220,13 @@
 
 
 
-
 import { Request, Response } from 'express';
 import { minioClient } from '../config/minoConfig';
-import { User } from '../models/user.model'; // Assuming you still want to fetch users for role-based sharing
+import { User } from '../models/user.model';  // Assuming you still want to fetch users for role-based sharing
 import nodemailer from 'nodemailer';
-import { Readable } from 'stream';
 import multer from 'multer';
 import dotenv from 'dotenv';
+import { File } from '../models/file.model';
 
 dotenv.config();
 
@@ -238,14 +237,19 @@ const upload = multer({ storage });
 // Middleware for handling file upload route
 export const uploadMiddleware = upload.single('file');
 
-// Upload file handler
 export const uploadFile = async (req: Request, res: Response): Promise<void> => {
   const bucketName = 'my-bucket';
   const file = req.file;
+  const userEmail = req.body.userEmail;
 
   if (!file) {
     res.status(400).send({ error: 'No file uploaded.' });
     return; // Ensure no further code execution
+  }
+
+  if (!userEmail) {
+    res.status(400).send({ error: 'User email is required.' });
+    return; // Ensure no further code execution if email is not provided
   }
 
   try {
@@ -263,16 +267,35 @@ export const uploadFile = async (req: Request, res: Response): Promise<void> => 
 
     console.log(`File ${file.originalname} uploaded to ${bucketName}`);
 
+    const downloadUrl = await generatePresignedUrl(bucketName, file.originalname);
+
+ 
+
+    // Store file details in MongoDB (File model)
+    const fileRecord = new File({
+      fileName: file.originalname,
+      sharedWith: [userEmail] ,  // Add email to sharedWith array if provided
+      shareType: 'individually',  // Modify based on how you share the file
+      expirationDate: new Date(Date.now() + 24 * 60 * 60 * 1000), // Set expiration (1 day)
+    });
+
+    // Check and log if fileRecord is saved properly
+    console.log('File record before save:', fileRecord);
+    await fileRecord.save();
+
+    console.log('File record saved successfully:', fileRecord);
+
     res.status(200).send({
       message: 'File uploaded successfully.',
       fileName: file.originalname,
-      downloadUrl: await generatePresignedUrl(bucketName, file.originalname), // Generate and include the download URL
+      downloadUrl,
     });
   } catch (err) {
     console.error('Error during file upload:', err);
     res.status(500).send({ error: 'Failed to upload the file.', details: err });
   }
 };
+
 
 // Function to generate a presigned URL for the uploaded file
 const generatePresignedUrl = async (bucketName: string, objectName: string): Promise<string> => {
@@ -285,17 +308,17 @@ const generatePresignedUrl = async (bucketName: string, objectName: string): Pro
   }
 };
 
-// Share File Handler (optional if you want to keep this functionality)
+// Share File Handler
 export const shareFile = async (req: Request, res: Response): Promise<void> => {
-  const { fileName } = req.body;
+  const { fileName, userEmail, shareType } = req.body;
 
-  if (!fileName) {
-    res.status(400).send({ error: 'Missing required fields.' });
+  if (!fileName || !userEmail) {
+    res.status(400).send({ error: 'Missing required fields: fileName, userEmail.' });
     return; // Ensure no further code execution
   }
 
   try {
-    console.log('Received request to share file:', { fileName });
+    console.log('Received request to share file:', { fileName, userEmail, shareType });
 
     // Check if the file exists before sharing
     const fileExists = await checkFileExists('my-bucket', fileName);
@@ -304,8 +327,32 @@ export const shareFile = async (req: Request, res: Response): Promise<void> => {
       return; // Ensure no further code execution
     }
 
+    // Verify if the user exists in the system
+    const userExists = await User.findOne({ email: userEmail });
+    if (!userExists) {
+      res.status(404).send({ error: 'User not found.' });
+      return; // Ensure no further code execution
+    }
+
     // Generate a presigned URL for the file
     const downloadUrl = await generatePresignedUrl('my-bucket', fileName);
+
+    // Fetch file record from the database
+    const fileRecord = await File.findOne({ fileName });
+    if (fileRecord) {
+      // Update file sharing information in MongoDB
+      if (!fileRecord.sharedWith.includes(userEmail)) {
+        fileRecord.sharedWith.push(userEmail); // Add email to shared list if not already present
+        fileRecord.shareType = shareType || 'individually';  // Update share type if provided
+        await fileRecord.save();
+        console.log('File record updated with shared user:', userEmail);
+      } else {
+        console.log('User has already been added to shared list.');
+      }
+    }
+
+    // Send email notification
+    sendEmailNotification(userEmail, fileName, downloadUrl);
 
     res.status(200).send({
       message: 'File shared successfully.',
@@ -317,7 +364,7 @@ export const shareFile = async (req: Request, res: Response): Promise<void> => {
   }
 };
 
-// Helper function to check if a file exists in MinIO (if still needed)
+// Helper function to check if a file exists in MinIO
 const checkFileExists = async (bucket: string, key: string): Promise<boolean> => {
   try {
     await minioClient.statObject(bucket, key);
@@ -330,7 +377,28 @@ const checkFileExists = async (bucket: string, key: string): Promise<boolean> =>
   }
 };
 
+// Send email notification
+const sendEmailNotification = (email: string, fileName: string, downloadUrl: string): void => {
+  const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS,
+    },
+  });
 
+  const mailOptions = {
+    from: process.env.EMAIL_USER,
+    to: email,
+    subject: 'File Shared With You',
+    text: `A file named ${fileName} has been shared with you. You can download it here: ${downloadUrl}`,
+  };
 
-
-
+  transporter.sendMail(mailOptions, (error, info) => {
+    if (error) {
+      console.log('Error sending email:', error);
+    } else {
+      console.log('Email sent:', info.response);
+    }
+  });
+};
